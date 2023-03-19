@@ -118,7 +118,8 @@ exports.LoadUtils = () => {
                 });
 
             content = options.sendMediaAsSticker ? undefined : attOptions.preview;
-
+            attOptions.caption = undefined
+            
             delete options.attachment;
             delete options.sendMediaAsSticker;
         }
