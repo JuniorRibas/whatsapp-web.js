@@ -119,7 +119,7 @@ exports.LoadUtils = () => {
                 });
 
             content = options.sendMediaAsSticker ? undefined : attOptions.preview;
-            if(options.activeCaption){
+            if(!options.activeCaption){
                 attOptions.caption = undefined
             }
             
