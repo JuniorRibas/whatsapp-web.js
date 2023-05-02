@@ -863,6 +863,7 @@ declare namespace WAWebJS {
         sendVideoAsGif?: boolean
         /** Send media as sticker */
         sendMediaAsSticker?: boolean
+        activeCaption?: boolean
         /** Send media as document */
         sendMediaAsDocument?: boolean
         /** Automatically parse vCards and send them as contacts */
