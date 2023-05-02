@@ -120,7 +120,7 @@ exports.LoadUtils = () => {
 
             content = options.sendMediaAsSticker ? undefined : attOptions.preview;
             if(!options.activeCaption){
-                attOptions.caption = undefined
+                // attOptions.caption = undefined
             }
             
             delete options.attachment;
