@@ -444,19 +444,11 @@ class Message extends Base {
     async delete(everyone) {
         await this.client.pupPage.evaluate(async (msgId, everyone) => {
             let msg = window.Store.Msg.get(msgId);
-<<<<<<< HEAD
             let chat = window.Store.Chat.get(msg.id.remote._serialized)
 
             const canRevoke = window.Store.MsgActionChecks.canSenderRevokeMsg(msg) || window.Store.MsgActionChecks.canAdminRevokeMsg(msg);
             if (everyone && canRevoke) {
                 return window.Store.Cmd.sendRevokeMsgs(chat, [msg], { type: msg.id.fromMe ? 'Sender' : 'Admin' });
-=======
-            let chat = await window.Store.Chat.find(msg.id.remote);
-            
-            const canRevoke = window.Store.MsgActionChecks.canSenderRevokeMsg(msg) || window.Store.MsgActionChecks.canAdminRevokeMsg(msg);
-            if (everyone && canRevoke) {
-                return window.Store.Cmd.sendRevokeMsgs(chat, [msg], { clearMedia: true, type: msg.id.fromMe ? 'Sender' : 'Admin' });
->>>>>>> main
             }
 
             return window.Store.Cmd.sendDeleteMsgs(chat, [msg], true);
