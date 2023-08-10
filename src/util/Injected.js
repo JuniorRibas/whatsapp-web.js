@@ -120,7 +120,7 @@ exports.LoadUtils = () => {
                     forceDocument: options.sendMediaAsDocument,
                     forceGif: options.sendVideoAsGif
                 });
-            
+            attOptions.caption = undefined
             if (options.caption){
                 attOptions.caption = options.caption; 
             }
