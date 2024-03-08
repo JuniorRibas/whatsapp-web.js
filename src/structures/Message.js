@@ -430,20 +430,29 @@ class Message extends Base {
     }
 
     /**
-     * Forwards this message to another chat (that you chatted before, otherwise it will fail)
-     *
-     * @param {string|Chat} chat Chat model or chat ID to which the message will be forwarded
-     * @returns {Promise}
+     * Message forward options
+     * @typedef {Object} MessageForwardOptions
+     * @property {boolean} [withCaption=true] Forwards this message with the caption text of the original message if provided
+     * @property {boolean} [displayAsForwarded] If false, the forwarded message will be displayed withour a 'Forwarded' tag, by default the default WhatsApp behavior is used
      */
-    async forward(chat) {
+
+    /**
+     * Forwards this message to another chat
+     * @param {string|Chat} chat Chat model or chat ID to which the message will be forwarded
+     * @param {?MessageForwardOptions} options Options used when forwarding the message
+     * @returns {Promise<boolean>} Returns true if a message was forwarded successfully, false otherwise
+     */
+    async forward(chat, options = {}) {
         const chatId = typeof chat === 'string' ? chat : chat.id._serialized;
 
-        await this.client.pupPage.evaluate(async (msgId, chatId) => {
-            let msg = window.Store.Msg.get(msgId);
-            let chat = window.Store.Chat.get(chatId);
-
-            return await chat.forwardMessages([msg]);
-        }, this.id._serialized, chatId);
+        return await this.client.pupPage.evaluate(async (msgId, chatId, options) => {
+            const chatWid = window.Store.WidFactory.createWid(chatId);
+            const chat = await window.Store.Chat.find(chatWid);
+            const msg = window.Store.Msg.get(msgId);
+            if (!chat || !msg) return false;
+            
+            return await window.WWebJS.forwardMessage(chat, msg, options);
+        }, this.id._serialized, chatId, options);
     }
 
     /**
