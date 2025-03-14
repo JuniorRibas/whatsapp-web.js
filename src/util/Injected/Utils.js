@@ -457,16 +457,15 @@ exports.LoadUtils = () => {
 
         if (chat.groupMetadata) {
             res.isGroup = true;
-            const chatWid = window.Store.WidFactory.createWid((chat.id._serialized));
-            await window.Store.GroupMetadata.update(chatWid);
-            res.groupMetadata = chat.groupMetadata.serialize();
+            // const chatWid = window.Store.WidFactory.createWid((chat.id._serialized));
+            // await window.Store.GroupMetadata.update(chatWid);
+            // res.groupMetadata = chat.groupMetadata.serialize();
         }
         
         res.lastMessage = null;
         if (res.msgs && res.msgs.length) {
             const lastMessage = chat.lastReceivedKey
-                ? window.Store.Msg.get(chat.lastReceivedKey._serialized) || (await window.Store.Msg.getMessagesById([chat.lastReceivedKey._serialized]))?.messages?.[0]
-                : null;
+                ? window.Store.Msg.get(chat.lastReceivedKey._serialized)  : null;
             if (lastMessage) {
                 res.lastMessage = window.WWebJS.getMessageModel(lastMessage);
             }
