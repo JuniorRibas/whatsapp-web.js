@@ -854,38 +854,6 @@ class Client extends EventEmitter {
                 window.WWebJS.sendSeen(chatId)
             );
 
-            // 2. Delivery confirmation (receipt) - implementing missing part
-            if (window.Store.SendReceipt && window.Store.SendReceipt.sendAggregateReceipts) {
-                // Use WAWebSendReceiptJobCommon module found in analysis
-                parallelOperations.push(
-                    window.Store.SendReceipt.sendAggregateReceipts({
-                        to: window.Store.WidFactory.createWid(chatId),
-                        type: window.Store.SendReceipt.RECEIPT_TYPE?.READ || 'read',
-                        t: Math.floor(Date.now() / 1000),
-                        groupedReceipt: null,
-                        recipient: null
-                    }).catch(err => {
-                        console.warn('SendReceipt operation failed:', err);
-                        return true; // Don't fail if only receipt fails
-                    })
-                );
-            } else if (window.Store.MessageReceiptBatcher && window.Store.MessageReceiptBatcher.receiptBatcher) {
-                // Fallback using MessageReceiptBatcher found in module.js
-                parallelOperations.push(
-                    Promise.resolve().then(() => {
-                        try {
-                            return window.Store.MessageReceiptBatcher.receiptBatcher.acceptOtherReceipt({
-                                chatId: chatId,
-                                type: 'read'
-                            });
-                        } catch (err) {
-                            console.warn('MessageReceiptBatcher operation failed:', err);
-                            return true; // Don't fail if only receipt fails
-                        }
-                    })
-                );
-            }
-
             // Execute both operations in parallel (obfuscated code pattern)
             if (parallelOperations.length > 1) {
                 await Promise.all(parallelOperations);
