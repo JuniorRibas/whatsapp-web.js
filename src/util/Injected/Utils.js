@@ -739,24 +739,24 @@ exports.LoadUtils = () => {
             model.formattedTitle = chat.formattedTitle;
         }
 
-        if (chat.groupMetadata) {
-            model.isGroup = true;
-            const chatWid = window.require('WAWebWidFactory').createWid(chat.id._serialized);
-            const groupMetadata = (window.require('WAWebCollections')).GroupMetadata || (window.require('WAWebCollections')).WAWebGroupMetadataCollection;
-            await groupMetadata.update(chatWid);
-            chat.groupMetadata.participants._models
-                .filter(x => x.id?._serialized?.endsWith('@lid'))
-                .forEach(x => x.contact?.phoneNumber && (x.id = x.contact.phoneNumber));
-            model.groupMetadata = chat.groupMetadata.serialize();
-            model.isReadOnly = chat.groupMetadata.announce;
-        }
+        // if (chat.groupMetadata) {
+        //     model.isGroup = true;
+        //     const chatWid = window.require('WAWebWidFactory').createWid(chat.id._serialized);
+        //     const groupMetadata = (window.require('WAWebCollections')).GroupMetadata || (window.require('WAWebCollections')).WAWebGroupMetadataCollection;
+        //     await groupMetadata.update(chatWid);
+        //     chat.groupMetadata.participants._models
+        //         .filter(x => x.id?._serialized?.endsWith('@lid'))
+        //         .forEach(x => x.contact?.phoneNumber && (x.id = x.contact.phoneNumber));
+        //     model.groupMetadata = chat.groupMetadata.serialize();
+        //     model.isReadOnly = chat.groupMetadata.announce;
+        // }
 
-        if (chat.newsletterMetadata) {
-            const newsletterMetadata = (window.require('WAWebCollections')).NewsletterMetadataCollection || (window.require('WAWebCollections')).WAWebNewsletterMetadataCollection;
-            await newsletterMetadata.update(chat.id);
-            model.channelMetadata = chat.newsletterMetadata.serialize();
-            model.channelMetadata.createdAtTs = chat.newsletterMetadata.creationTime;
-        }
+        // if (chat.newsletterMetadata) {
+        //     const newsletterMetadata = (window.require('WAWebCollections')).NewsletterMetadataCollection || (window.require('WAWebCollections')).WAWebNewsletterMetadataCollection;
+        //     await newsletterMetadata.update(chat.id);
+        //     model.channelMetadata = chat.newsletterMetadata.serialize();
+        //     model.channelMetadata.createdAtTs = chat.newsletterMetadata.creationTime;
+        // }
 
         model.lastMessage = null;
         if (model.msgs && model.msgs.length) {
