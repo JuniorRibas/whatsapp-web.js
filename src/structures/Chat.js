@@ -223,11 +223,37 @@ class Chat extends Base {
                 let msgs = chat.msgs.getModelsArray().filter(msgFilter);
 
                 if (searchOptions && searchOptions.limit > 0) {
+                    const msgFindLocal = window.require(
+                        'WAWebDBMessageFindLocal',
+                    );
+                    const MsgStore = window.require('WAWebCollections').Msg;
+
                     while (msgs.length < searchOptions.limit) {
-                        const loadedMessages = await window
-                            .require('WAWebChatLoadMessages')
-                            .loadEarlierMsgs(chat, chat.msgs);
-                        if (!loadedMessages || !loadedMessages.length) break;
+                        const anchor =
+                            msgs[0]?.id || chat.msgs.getModelsArray()[0]?.id;
+                        if (!anchor) break;
+
+                        const result = await msgFindLocal.msgFindBefore({
+                            anchor: anchor,
+                            count: searchOptions.limit - msgs.length,
+                        });
+
+                        const rawMessages = Array.isArray(result)
+                            ? result
+                            : result?.messages || [];
+                        if (!rawMessages.length) break;
+
+                        const loadedMessages = rawMessages
+                            .map((m) => {
+                                if (m && typeof m.serialize === 'function')
+                                    return m;
+                                return (
+                                    MsgStore.get(m.id?._serialized || m) || null
+                                );
+                            })
+                            .filter(Boolean);
+                        if (!loadedMessages.length) break;
+
                         msgs = [...loadedMessages.filter(msgFilter), ...msgs];
                     }
 
