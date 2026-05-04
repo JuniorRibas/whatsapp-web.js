@@ -1076,16 +1076,8 @@ exports.LoadUtils = () => {
         const contacts = window
             .require('WAWebCollections')
             .Contact.getModelsArray();
-        return Promise.all(
-            contacts.map(async (contact) => {
-                if (contact.isBusiness || contact.isEnterprise) {
-                    await window
-                        .require('WAWebCollections')
-                        .BusinessProfile.find(contact.id)
-                        .catch(() => {});
-                }
-                return window.WWebJS.getContactModel(contact);
-            }),
+        return contacts.map((contact) =>
+            window.WWebJS.getContactModel(contact),
         );
     };
 
