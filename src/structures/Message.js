@@ -35,6 +35,16 @@ class Message extends Base {
          * @type {object}
          */
         this.id = data.id;
+        // Recent WhatsApp Web builds renamed the serialized-key getter from
+        // `_serialized` to `$1`. Backfill `_serialized` so downstream reads keep working.
+        if (
+            this.id &&
+            typeof this.id === 'object' &&
+            this.id._serialized === undefined &&
+            this.id.$1 !== undefined
+        ) {
+            this.id._serialized = this.id.$1;
+        }
 
         /**
          * ACK status for the message
@@ -74,7 +84,7 @@ class Message extends Base {
          */
         this.from =
             typeof data.from === 'object' && data.from !== null
-                ? data.from._serialized
+                ? data.from._serialized ?? data.from.$1
                 : data.from;
 
         /**
@@ -86,7 +96,7 @@ class Message extends Base {
          */
         this.to =
             typeof data.to === 'object' && data.to !== null
-                ? data.to._serialized
+                ? data.to._serialized ?? data.to.$1
                 : data.to;
 
         /**
@@ -95,7 +105,7 @@ class Message extends Base {
          */
         this.author =
             typeof data.author === 'object' && data.author !== null
-                ? data.author._serialized
+                ? data.author._serialized ?? data.author.$1
                 : data.author;
 
         /**
@@ -209,14 +219,12 @@ class Message extends Base {
                       groupId: data.inviteGrp,
                       groupName: data.inviteGrpName,
                       fromId:
-                          typeof data.from === 'object' &&
-                          '_serialized' in data.from
-                              ? data.from._serialized
+                          typeof data.from === 'object' && data.from !== null
+                              ? data.from._serialized ?? data.from.$1
                               : data.from,
                       toId:
-                          typeof data.to === 'object' &&
-                          '_serialized' in data.to
-                              ? data.to._serialized
+                          typeof data.to === 'object' && data.to !== null
+                              ? data.to._serialized ?? data.to.$1
                               : data.to,
                   }
                 : undefined;
@@ -405,7 +413,7 @@ class Message extends Base {
             this.mentionedIds.map(
                 async (m) =>
                     await this.client.getContactById(
-                        typeof m === 'string' ? m : m._serialized,
+                        typeof m === 'string' ? m : m._serialized ?? m.$1,
                     ),
             ),
         );
@@ -419,7 +427,9 @@ class Message extends Base {
         return await Promise.all(
             this.groupMentions.map(
                 async (m) =>
-                    await this.client.getChatById(m.groupJid._serialized),
+                    await this.client.getChatById(
+                        m.groupJid._serialized ?? m.groupJid.$1,
+                    ),
             ),
         );
     }
@@ -495,7 +505,8 @@ class Message extends Base {
      * @returns {Promise}
      */
     async forward(chat) {
-        const chatId = typeof chat === 'string' ? chat : chat.id._serialized;
+        const chatId =
+            typeof chat === 'string' ? chat : chat.id._serialized ?? chat.id.$1;
 
         await this.client.pupPage.evaluate(
             async (msgId, chatId) => {
@@ -885,7 +896,7 @@ class Message extends Base {
                     'Mentions with an array of Contact are now deprecated. See more at https://github.com/wwebjs/whatsapp-web.js/pull/2166.',
                 );
                 options.mentions = options.mentions.map(
-                    (a) => a.id._serialized,
+                    (a) => a.id._serialized ?? a.id.$1,
                 );
             }
         }
@@ -981,7 +992,7 @@ class Message extends Base {
                     .sendEventEditMessage(eventOptions, msg);
                 const editedMsg = window
                     .require('WAWebCollections')
-                    .Msg.get(msg.id._serialized);
+                    .Msg.get(msg.id._serialized || msg.id.$1);
                 return editedMsg?.serialize();
             },
             this.id._serialized,

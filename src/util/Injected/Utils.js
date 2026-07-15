@@ -582,7 +582,7 @@ exports.LoadUtils = () => {
 
         return window
             .require('WAWebCollections')
-            .Msg.get(newMsgKey._serialized);
+            .Msg.get(newMsgKey._serialized || newMsgKey.$1);
     };
 
     window.WWebJS.editMessage = async (msg, content, options = {}) => {
@@ -625,7 +625,9 @@ exports.LoadUtils = () => {
         await window
             .require('WAWebSendMessageEditAction')
             .sendMessageEdit(msg, content, internalOptions);
-        return window.require('WAWebCollections').Msg.get(msg.id._serialized);
+        return window
+            .require('WAWebCollections')
+            .Msg.get(msg.id._serialized || msg.id.$1);
     };
 
     window.WWebJS.toStickerData = async (mediaInfo) => {
@@ -830,7 +832,7 @@ exports.LoadUtils = () => {
 
         if (typeof msg.id.remote === 'object') {
             msg.id = Object.assign({}, msg.id, {
-                remote: msg.id.remote._serialized,
+                remote: msg.id.remote._serialized || msg.id.remote.$1,
             });
         }
 
@@ -1259,9 +1261,10 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.rejectCall = async (peerJid, id) => {
-        let userId = window
+        const meUser = window
             .require('WAWebUserPrefsMeUser')
-            .getMaybeMePnUser()._serialized;
+            .getMaybeMePnUser();
+        let userId = meUser._serialized || meUser.$1;
 
         const stanza = window.require('WAWap').wap(
             'call',
@@ -1570,10 +1573,13 @@ exports.LoadUtils = () => {
                                 : value.participant[0]
                                       .membershipRequestsActionRejectParticipantMixins
                                       ?.value.error;
+                            const requesterWid = window
+                                .require('WAWebWidFactory')
+                                .createWid(p.jid);
                             return {
-                                requesterId: window
-                                    .require('WAWebWidFactory')
-                                    .createWid(p.jid)._serialized,
+                                requesterId:
+                                    requesterWid._serialized ||
+                                    requesterWid.$1,
                                 ...(error
                                     ? {
                                           error: +error,
@@ -1589,12 +1595,14 @@ exports.LoadUtils = () => {
                         _ && result.push(_);
                     }
                 } else {
+                    const requesterWid = window
+                        .require('WAWebJidToWid')
+                        .userJidToUserWid(
+                            participant.participantArgs[0].participantJid,
+                        );
                     result.push({
-                        requesterId: window
-                            .require('WAWebJidToWid')
-                            .userJidToUserWid(
-                                participant.participantArgs[0].participantJid,
-                            )._serialized,
+                        requesterId:
+                            requesterWid._serialized || requesterWid.$1,
                         message: 'ServerStatusCodeError',
                     });
                 }
