@@ -830,10 +830,17 @@ exports.LoadUtils = () => {
             msg.replyButtons = JSON.parse(JSON.stringify(msg.replyButtons));
         }
 
-        if (typeof msg.id.remote === 'object') {
+        if (typeof msg.id.remote === 'object' && msg.id.remote !== null) {
             msg.id = Object.assign({}, msg.id, {
                 remote: msg.id.remote._serialized || msg.id.remote.$1,
             });
+        }
+
+        // Recent WhatsApp Web builds renamed the serialized-key getter from
+        // `_serialized` to `$1`. Backfill it here, at the source, so every
+        // downstream Node.js read of `msg.id._serialized` keeps working.
+        if (msg.id && msg.id._serialized == null && msg.id.$1 != null) {
+            msg.id = Object.assign({}, msg.id, { _serialized: msg.id.$1 });
         }
 
         delete msg.pendingAckUpdate;

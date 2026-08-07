@@ -35,17 +35,7 @@ class Message extends Base {
          * ID that represents the message
          * @type {object}
          */
-        this.id = data.id;
-        // Recent WhatsApp Web builds renamed the serialized-key getter from
-        // `_serialized` to `$1`. Backfill `_serialized` so downstream reads keep working.
-        if (
-            this.id &&
-            typeof this.id === 'object' &&
-            this.id._serialized === undefined &&
-            this.id.$1 !== undefined
-        ) {
-            this.id._serialized = this.id.$1;
-        }
+        this.id = Base._normalizeId(data.id);
 
         /**
          * ACK status for the message
