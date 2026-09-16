@@ -1081,51 +1081,99 @@ class Client extends EventEmitter {
             const { Msg, Chat } = window.require('WAWebCollections');
             const AppState = window.require('WAWebSocketModel').Socket;
 
+            // Our callbacks run inside the WA collections' `trigger()`, which is
+            // itself driven by the history/app-state sync pipeline. An exception
+            // escaping from here aborts WhatsApp's own sync batch, which ends with
+            // the companion being unlinked ("could not link due to a sync issue").
+            // Nothing we attach is allowed to throw into WhatsApp's stack.
+            const safe =
+                (name, fn) =>
+                (...args) => {
+                    try {
+                        const result = fn(...args);
+                        if (result && typeof result.catch === 'function') {
+                            result.catch((err) =>
+                                console.error(
+                                    `[WWebJS] handler ${name} failed`,
+                                    err,
+                                ),
+                            );
+                        }
+                        return result;
+                    } catch (err) {
+                        console.error(`[WWebJS] handler ${name} failed`, err);
+                    }
+                };
+
             // Enable placeholder message resend (recovery for ciphertext messages)
             const gatingUtils = window.require('WAWebSyncGatingUtils');
             gatingUtils.isPlaceholderMessageResendEnabled = () => true;
 
-            Msg.on('change', (msg) => {
-                window.onChangeMessageEvent(window.WWebJS.getMessageModel(msg));
-            });
-            Msg.on('change:type', (msg) => {
-                window.onChangeMessageTypeEvent(
-                    window.WWebJS.getMessageModel(msg),
-                );
-            });
-            Msg.on('change:ack', (msg, ack) => {
-                window.onMessageAckEvent(
-                    window.WWebJS.getMessageModel(msg),
-                    ack,
-                );
-            });
-            Msg.on('change:isUnsentMedia', (msg, unsent) => {
-                if (msg.id.fromMe && !unsent)
-                    window.onMessageMediaUploadedEvent(
+            Msg.on(
+                'change',
+                safe('Msg:change', (msg) => {
+                    window.onChangeMessageEvent(
                         window.WWebJS.getMessageModel(msg),
                     );
-            });
-            Msg.on('remove', (msg) => {
-                if (msg.isNewMsg)
-                    window.onRemoveMessageEvent(
+                }),
+            );
+            Msg.on(
+                'change:type',
+                safe('Msg:change:type', (msg) => {
+                    window.onChangeMessageTypeEvent(
                         window.WWebJS.getMessageModel(msg),
                     );
-            });
-            Msg.on('change:body change:caption', (msg, newBody, prevBody) => {
-                window.onEditMessageEvent(
-                    window.WWebJS.getMessageModel(msg),
-                    newBody,
-                    prevBody,
-                );
-            });
-            AppState.on('change:state', (_AppState, state) => {
-                window.onAppStateChangedEvent(state);
-            });
-            window
-                .require('WAWebConnModel')
-                .Conn.on('change:battery', (state) => {
+                }),
+            );
+            Msg.on(
+                'change:ack',
+                safe('Msg:change:ack', (msg, ack) => {
+                    window.onMessageAckEvent(
+                        window.WWebJS.getMessageModel(msg),
+                        ack,
+                    );
+                }),
+            );
+            Msg.on(
+                'change:isUnsentMedia',
+                safe('Msg:change:isUnsentMedia', (msg, unsent) => {
+                    if (msg.id.fromMe && !unsent)
+                        window.onMessageMediaUploadedEvent(
+                            window.WWebJS.getMessageModel(msg),
+                        );
+                }),
+            );
+            Msg.on(
+                'remove',
+                safe('Msg:remove', (msg) => {
+                    if (msg.isNewMsg)
+                        window.onRemoveMessageEvent(
+                            window.WWebJS.getMessageModel(msg),
+                        );
+                }),
+            );
+            Msg.on(
+                'change:body change:caption',
+                safe('Msg:change:body', (msg, newBody, prevBody) => {
+                    window.onEditMessageEvent(
+                        window.WWebJS.getMessageModel(msg),
+                        newBody,
+                        prevBody,
+                    );
+                }),
+            );
+            AppState.on(
+                'change:state',
+                safe('AppState:change:state', (_AppState, state) => {
+                    window.onAppStateChangedEvent(state);
+                }),
+            );
+            window.require('WAWebConnModel').Conn.on(
+                'change:battery',
+                safe('Conn:change:battery', (state) => {
                     window.onBatteryStateChangedEvent(state);
-                });
+                }),
+            );
             const WAWebCallCollection = window.require('WAWebCallCollection');
             if (
                 WAWebCallCollection &&
@@ -1139,31 +1187,44 @@ class Client extends EventEmitter {
                     internalCallMap.set.bind(internalCallMap);
 
                 internalCallMap.set = function (key, value) {
-                    window.onIncomingCall({
-                        id: value.id,
-                        peerJid: value.peerJid,
-                        isVideo: value.isVideo,
-                        isGroup: value.isGroup,
-                        canHandleLocally: value.canHandleLocally,
-                        outgoing: value.outgoing,
-                        webClientShouldHandle: value.webClientShouldHandle,
-                        participants: value.participants,
-                    });
+                    try {
+                        window.onIncomingCall({
+                            id: value.id,
+                            peerJid: value.peerJid,
+                            isVideo: value.isVideo,
+                            isGroup: value.isGroup,
+                            canHandleLocally: value.canHandleLocally,
+                            outgoing: value.outgoing,
+                            webClientShouldHandle: value.webClientShouldHandle,
+                            participants: value.participants,
+                        });
+                    } catch (err) {
+                        console.error('[WWebJS] onIncomingCall failed', err);
+                    }
                     return originalMapSet(key, value);
                 };
             }
-            Chat.on('remove', async (chat) => {
-                window.onRemoveChatEvent(
-                    await window.WWebJS.getChatModel(chat),
-                );
-            });
-            Chat.on('change:archive', async (chat, currState, prevState) => {
-                window.onArchiveChatEvent(
-                    await window.WWebJS.getChatModel(chat),
-                    currState,
-                    prevState,
-                );
-            });
+            Chat.on(
+                'remove',
+                safe('Chat:remove', async (chat) => {
+                    window.onRemoveChatEvent(
+                        await window.WWebJS.getChatModel(chat),
+                    );
+                }),
+            );
+            Chat.on(
+                'change:archive',
+                safe(
+                    'Chat:change:archive',
+                    async (chat, currState, prevState) => {
+                        window.onArchiveChatEvent(
+                            await window.WWebJS.getChatModel(chat),
+                            currState,
+                            prevState,
+                        );
+                    },
+                ),
+            );
             const pendingResend = new Set();
             let resendFlush = null;
 
@@ -1175,52 +1236,78 @@ class Client extends EventEmitter {
                     const msgs = [...pendingResend];
                     pendingResend.clear();
                     if (msgs.length === 0) return;
-                    window
-                        .require(
-                            'WAWebNonMessageDataRequestPlaceholderMessageResendUtils',
-                        )
-                        .handlePlaceholderMsgsSeen(msgs, true);
+                    try {
+                        window
+                            .require(
+                                'WAWebNonMessageDataRequestPlaceholderMessageResendUtils',
+                            )
+                            .handlePlaceholderMsgsSeen(msgs, true);
+                    } catch (err) {
+                        console.error(
+                            '[WWebJS] placeholder resend failed',
+                            err,
+                        );
+                    }
                 }, 5000);
             }
 
-            Msg.on('add', (msg) => {
-                if (!msg.isNewMsg) return;
+            Msg.on(
+                'add',
+                safe('Msg:add', (msg) => {
+                    if (!msg.isNewMsg) return;
 
-                if (msg.type !== 'ciphertext') {
-                    window.onAddMessageEvent(
+                    if (msg.type !== 'ciphertext') {
+                        window.onAddMessageEvent(
+                            window.WWebJS.getMessageModel(msg),
+                        );
+                        return;
+                    }
+
+                    window.onAddMessageCiphertextEvent(
                         window.WWebJS.getMessageModel(msg),
                     );
-                    return;
-                }
 
-                window.onAddMessageCiphertextEvent(
-                    window.WWebJS.getMessageModel(msg),
-                );
+                    if (
+                        msg.subtype &&
+                        msg.subtype.endsWith('_unavailable_fanout')
+                    )
+                        return;
 
-                if (msg.subtype && msg.subtype.endsWith('_unavailable_fanout'))
-                    return;
+                    requestResend(msg);
 
-                requestResend(msg);
+                    const failTimer = setTimeout(() => {
+                        if (msg.type !== 'ciphertext') return;
+                        try {
+                            window.onCiphertextFailedEvent(
+                                window.WWebJS.getMessageModel(msg),
+                            );
+                        } catch (err) {
+                            console.error(
+                                '[WWebJS] onCiphertextFailedEvent failed',
+                                err,
+                            );
+                        }
+                    }, 15000);
 
-                const failTimer = setTimeout(() => {
-                    if (msg.type !== 'ciphertext') return;
-                    window.onCiphertextFailedEvent(
-                        window.WWebJS.getMessageModel(msg),
+                    msg.once(
+                        'change:type',
+                        safe('Msg:once:change:type', (_msg) => {
+                            clearTimeout(failTimer);
+                            pendingResend.delete(_msg);
+                            if (_msg.type === 'revoked') return;
+                            window.onAddMessageEvent(
+                                window.WWebJS.getMessageModel(_msg),
+                            );
+                        }),
                     );
-                }, 15000);
-
-                msg.once('change:type', (_msg) => {
-                    clearTimeout(failTimer);
-                    pendingResend.delete(_msg);
-                    if (_msg.type === 'revoked') return;
-                    window.onAddMessageEvent(
-                        window.WWebJS.getMessageModel(_msg),
-                    );
-                });
-            });
-            Chat.on('change:unreadCount', (chat) => {
-                window.onChatUnreadCountEvent(chat);
-            });
+                }),
+            );
+            Chat.on(
+                'change:unreadCount',
+                safe('Chat:change:unreadCount', (chat) => {
+                    window.onChatUnreadCountEvent(chat);
+                }),
+            );
 
             window.WWebJS.injectToFunction(
                 {
@@ -1228,25 +1315,36 @@ class Client extends EventEmitter {
                     function: 'reactionTableMode.bulkUpsert',
                 },
                 (module, origFunction, ...args) => {
-                    window.onReaction(
-                        args[0].map((reaction) => {
-                            const msgKey = reaction.id;
-                            const parentMsgKey = reaction.reactionParentKey;
-                            const timestamp = reaction.reactionTimestamp / 1000;
-                            const sender = reaction.author ?? reaction.from;
-                            const senderUserJid = sender._serialized || sender.$1;
+                    // Persist first, notify after: this hook sits on WhatsApp's own
+                    // write path, so it must always call through even if our
+                    // mapping throws on an unexpected payload shape.
+                    const result = origFunction.apply(module, args);
 
-                            return {
-                                ...reaction,
-                                msgKey,
-                                parentMsgKey,
-                                senderUserJid,
-                                timestamp,
-                            };
-                        }),
-                    );
+                    try {
+                        window.onReaction(
+                            args[0].map((reaction) => {
+                                const msgKey = reaction.id;
+                                const parentMsgKey = reaction.reactionParentKey;
+                                const timestamp =
+                                    reaction.reactionTimestamp / 1000;
+                                const sender = reaction.author ?? reaction.from;
+                                const senderUserJid =
+                                    sender && (sender._serialized || sender.$1);
 
-                    return origFunction.apply(module, args);
+                                return {
+                                    ...reaction,
+                                    msgKey,
+                                    parentMsgKey,
+                                    senderUserJid,
+                                    timestamp,
+                                };
+                            }),
+                        );
+                    } catch (err) {
+                        console.error('[WWebJS] onReaction failed', err);
+                    }
+
+                    return result;
                 },
             );
 
@@ -1255,42 +1353,56 @@ class Client extends EventEmitter {
                     module: 'WAWebAddonPollVoteTableMode',
                     function: 'pollVoteTableMode.bulkUpsert',
                 },
-                async (module, origFunction, ...args) => {
-                    const votes = await Promise.all(
-                        args[0].map(async (vote) => {
-                            const msgKey = vote.id;
-                            const parentMsgKey = vote.pollUpdateParentKey;
-                            const timestamp = vote.t / 1000;
-                            const sender = vote.author ?? vote.from;
-                            const senderUserJid = sender._serialized || sender.$1;
+                (module, origFunction, ...args) => {
+                    // Same as above, and note this hook must stay synchronous:
+                    // awaiting `getMessagesById` before calling through turned a
+                    // WhatsApp write-path call into a network-bound promise.
+                    const result = origFunction.apply(module, args);
+                    const rawVotes = args[0];
 
-                            const parentMsgKeySerialized =
-                                parentMsgKey._serialized || parentMsgKey.$1;
-                            let parentMessage = Msg.get(
-                                parentMsgKeySerialized,
-                            );
-                            if (!parentMessage) {
-                                const fetched = await Msg.getMessagesById([
-                                    parentMsgKeySerialized,
-                                ]);
-                                parentMessage = fetched?.messages?.[0] || null;
-                            }
+                    (async () => {
+                        const votes = await Promise.all(
+                            rawVotes.map(async (vote) => {
+                                const msgKey = vote.id;
+                                const parentMsgKey = vote.pollUpdateParentKey;
+                                const timestamp = vote.t / 1000;
+                                const sender = vote.author ?? vote.from;
+                                const senderUserJid =
+                                    sender && (sender._serialized || sender.$1);
 
-                            return {
-                                ...vote,
-                                msgKey,
-                                sender,
-                                parentMsgKey,
-                                senderUserJid,
-                                timestamp,
-                                parentMessage,
-                            };
-                        }),
+                                const parentMsgKeySerialized =
+                                    parentMsgKey &&
+                                    (parentMsgKey._serialized ||
+                                        parentMsgKey.$1);
+                                let parentMessage = parentMsgKeySerialized
+                                    ? Msg.get(parentMsgKeySerialized)
+                                    : null;
+                                if (!parentMessage && parentMsgKeySerialized) {
+                                    const fetched = await Msg.getMessagesById([
+                                        parentMsgKeySerialized,
+                                    ]);
+                                    parentMessage =
+                                        fetched?.messages?.[0] || null;
+                                }
+
+                                return {
+                                    ...vote,
+                                    msgKey,
+                                    sender,
+                                    parentMsgKey,
+                                    senderUserJid,
+                                    timestamp,
+                                    parentMessage,
+                                };
+                            }),
+                        );
+
+                        window.onPollVoteEvent(votes);
+                    })().catch((err) =>
+                        console.error('[WWebJS] onPollVoteEvent failed', err),
                     );
 
-                    window.onPollVoteEvent(votes);
-
-                    return origFunction.apply(module, args);
+                    return result;
                 },
             );
         });
@@ -1552,7 +1664,8 @@ class Client extends EventEmitter {
             internalOptions.event = content;
             content = '';
         } else if (content instanceof Contact) {
-            internalOptions.contactCard = content.id._serialized || content.id.$1;
+            internalOptions.contactCard =
+                content.id._serialized || content.id.$1;
             content = '';
         } else if (
             Array.isArray(content) &&
@@ -2446,7 +2559,8 @@ class Client extends EventEmitter {
                         (participant.wid = window
                             .require('WAWebApiContact')
                             .getPhoneNumber(participant.wid));
-                    const participantId = participant.wid._serialized || participant.wid.$1;
+                    const participantId =
+                        participant.wid._serialized || participant.wid.$1;
                     const statusCode = participant.error || 200;
 
                     if (autoSendInviteV4 && statusCode === 403) {
@@ -2462,7 +2576,8 @@ class Client extends EventEmitter {
                                     (await window
                                         .require('WAWebCollections')
                                         .Chat.find(participant.wid)),
-                                createGroupResult.wid._serialized || createGroupResult.wid.$1,
+                                createGroupResult.wid._serialized ||
+                                    createGroupResult.wid.$1,
                                 createGroupResult.subject,
                                 participant.invite_code,
                                 participant.invite_code_exp,
@@ -2997,7 +3112,9 @@ class Client extends EventEmitter {
                 );
                 const chats = window
                     .require('WAWebCollections')
-                    .Chat.filter((e) => chatIds.includes(e.id._serialized || e.id.$1));
+                    .Chat.filter((e) =>
+                        chatIds.includes(e.id._serialized || e.id.$1),
+                    );
 
                 let actions = labels.map((label) => ({
                     id: label.id,
