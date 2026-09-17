@@ -665,6 +665,14 @@ exports.LoadUtils = () => {
             ...extraOptions,
         };
 
+        // `mediaOptions` is a MediaData model, and the spread above copies its
+        // own enumerable properties -- including the model's private `__x_id`
+        // storage. That overwrites the MsgKey set as `id`, so getValidatedSender()
+        // fails during Msg.initialize with "Data passed to getter must include an
+        // id property". Only media sends are affected; text is untouched.
+        // Upstream: wwebjs/whatsapp-web.js#201923 (issue #201922).
+        delete message.__x_id;
+
         // Bot's won't reply if canonicalUrl is set (linking)
         if (botOptions) {
             delete message.canonicalUrl;
