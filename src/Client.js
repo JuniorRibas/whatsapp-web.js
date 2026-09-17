@@ -3448,9 +3448,13 @@ class Client extends EventEmitter {
 
         return await this.pupPage.evaluate(
             async (startTimeTs, callType) => {
-                const response = await window
-                    .require('WAWebGenerateEventCallLink')
-                    .createEventCallLink(startTimeTs, callType);
+                const module = await window.WWebJS.requireLazy(
+                    'WAWebGenerateEventCallLink',
+                );
+                const response = await module.createEventCallLink(
+                    startTimeTs,
+                    callType,
+                );
                 return response ?? '';
             },
             startTime,

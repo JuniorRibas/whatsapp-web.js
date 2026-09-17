@@ -4,6 +4,181 @@ exports.LoadUtils = () => {
     window.WWebJS = {};
 
     /**
+     * WhatsApp Web >= 2.3000 splits its module graph into resource bundles the
+     * Bootloader only fetches when something on the page needs them. A module
+     * whose bundle this session never needed is simply absent from the registry:
+     * `window.require` resolves to `undefined` for the whole life of the page,
+     * however many times it is retried. A headless client never opens the
+     * forward UI, so `WAWebChatForwardMessage` is never registered and every
+     * forward fails with "Cannot read properties of undefined".
+     *
+     * The Bootloader can only be asked for a bundle by *component* name, and the
+     * module ids a bundle defines are not published anywhere on the page, so the
+     * mapping has to be recorded. Values below are taken from wa-js
+     * (src/loader/lazyModules.ts), which measured them against live builds.
+     */
+    const LAZY_MODULES = {
+        WAWebChatForwardMessage: {
+            components: [
+                'WAWebMediaForwardMediaMsg',
+                'WAWebForwardMessageFlow.react',
+                'WAWebForwardMessageModal.react',
+            ],
+            pattern: /forward/i,
+        },
+        WAWebGenerateEventCallLink: {
+            components: ['WAWebEventsCreateEventModalFlow.react'],
+            pattern: /EventsCreateEvent/,
+        },
+    };
+    const MAX_DISCOVERED_COMPONENTS = 5;
+    const bootloadedComponents = new Set();
+    const lazyModulePromises = new Map();
+
+    const isModuleRegistered = (moduleId) => {
+        try {
+            return Boolean(window.require(moduleId));
+        } catch (ignoredError) {
+            return false;
+        }
+    };
+
+    const getBootloader = () => {
+        try {
+            const module = window.require('Bootloader');
+            const bootloader =
+                typeof module?.loadModules === 'function'
+                    ? module
+                    : module?.default;
+            return typeof bootloader?.loadModules === 'function'
+                ? bootloader
+                : null;
+        } catch (ignoredError) {
+            return null;
+        }
+    };
+
+    const candidateComponents = (moduleId) => {
+        const source = LAZY_MODULES[moduleId];
+        if (!source) return [];
+
+        const componentMap = getBootloader()?.__debug?.componentMap;
+        if (!componentMap || typeof componentMap.keys !== 'function') {
+            return source.components;
+        }
+
+        const candidates = source.components.filter((name) =>
+            componentMap.has(name),
+        );
+
+        // WhatsApp renames components too; rediscover a bounded set from the
+        // live map when the recorded names are gone.
+        if (source.pattern) {
+            let discovered = 0;
+            for (const name of componentMap.keys()) {
+                if (discovered >= MAX_DISCOVERED_COMPONENTS) break;
+                if (source.pattern.test(name) && !candidates.includes(name)) {
+                    candidates.push(name);
+                    discovered++;
+                }
+            }
+        }
+
+        return candidates;
+    };
+
+    const bootloadComponent = (bootloader, component, timeout = 30000) =>
+        new Promise((resolve, reject) => {
+            let settled = false;
+            const timer = setTimeout(() => {
+                if (settled) return;
+                settled = true;
+                reject(
+                    new Error(`Bootloader timed out loading '${component}'`),
+                );
+            }, timeout);
+
+            try {
+                bootloader.loadModules(
+                    [component],
+                    () => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timer);
+                        resolve();
+                    },
+                    'whatsapp-web.js',
+                );
+            } catch (err) {
+                settled = true;
+                clearTimeout(timer);
+                reject(err);
+            }
+        });
+
+    const resolveLazyModule = async (moduleId) => {
+        const bootloader = getBootloader();
+        if (!bootloader) return false;
+
+        for (const component of candidateComponents(moduleId)) {
+            // Each component is fetched at most once per page, so repeated
+            // calls after a failure cost nothing.
+            if (bootloadedComponents.has(component)) continue;
+            bootloadedComponents.add(component);
+
+            try {
+                await bootloadComponent(bootloader, component);
+            } catch (ignoredError) {
+                continue;
+            }
+
+            if (isModuleRegistered(moduleId)) return true;
+        }
+
+        return isModuleRegistered(moduleId);
+    };
+
+    /**
+     * Make sure a module that ships in a lazily bootloaded bundle is registered.
+     * Best-effort: returns whether `moduleId` is usable when it finishes.
+     * @param {string} moduleId
+     * @returns {Promise<boolean>}
+     */
+    window.WWebJS.ensureLazyModule = async (moduleId) => {
+        if (isModuleRegistered(moduleId)) return true;
+
+        let pending = lazyModulePromises.get(moduleId);
+        if (!pending) {
+            pending = resolveLazyModule(moduleId).finally(() => {
+                lazyModulePromises.delete(moduleId);
+            });
+            lazyModulePromises.set(moduleId, pending);
+        }
+
+        return pending;
+    };
+
+    /**
+     * `window.require` for a module that may live in a lazy bundle: fetches the
+     * bundle if needed and throws a readable error instead of letting the caller
+     * dereference `undefined`.
+     * @param {string} moduleId
+     * @returns {Promise<object>}
+     */
+    window.WWebJS.requireLazy = async (moduleId) => {
+        await window.WWebJS.ensureLazyModule(moduleId);
+
+        const module = window.require(moduleId);
+        if (!module) {
+            throw new Error(
+                `WhatsApp module '${moduleId}' is not available in this session`,
+            );
+        }
+
+        return module;
+    };
+
+    /**
      * Helper function that compares between two WWeb versions. Its purpose is to help the developer to choose the correct code implementation depending on the comparison value and the WWeb version.
      * @param {string} lOperand The left operand for the WWeb version string to compare with
      * @param {string} operator The comparison operator
@@ -119,7 +294,12 @@ exports.LoadUtils = () => {
                     .Msg.getMessagesById([msgId])
             )?.messages?.[0];
         const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
-        return await window.require('WAWebChatForwardMessage').forwardMessages({
+        // Ships in a lazily bootloaded bundle; a session that never opens the
+        // forward UI does not have it registered.
+        const forwardModule = await window.WWebJS.requireLazy(
+            'WAWebChatForwardMessage',
+        );
+        return await forwardModule.forwardMessages({
             chat: chat,
             msgs: [msg],
             multicast: true,
@@ -269,12 +449,14 @@ exports.LoadUtils = () => {
                 eventJoinLink:
                     eventSendOptions.callType === 'none'
                         ? null
-                        : await window
-                              .require('WAWebGenerateEventCallLink')
-                              .createEventCallLink(
-                                  startTimeTs,
-                                  eventSendOptions.callType,
-                              ),
+                        : await (
+                              await window.WWebJS.requireLazy(
+                                  'WAWebGenerateEventCallLink',
+                              )
+                          ).createEventCallLink(
+                              startTimeTs,
+                              eventSendOptions.callType,
+                          ),
                 isEventCanceled: eventSendOptions.isEventCanceled,
                 messageSecret:
                     Array.isArray(messageSecret) && messageSecret.length === 32
@@ -995,9 +1177,7 @@ exports.LoadUtils = () => {
                 : null;
 
             const lastMessage = lastReceivedKey
-                ? window
-                      .require('WAWebCollections')
-                      .Msg.get(lastReceivedKey) ||
+                ? window.require('WAWebCollections').Msg.get(lastReceivedKey) ||
                   (
                       await window
                           .require('WAWebCollections')
@@ -1006,8 +1186,7 @@ exports.LoadUtils = () => {
                 : null;
 
             if (lastMessage) {
-                model.lastMessage =
-                    window.WWebJS.getMessageModel(lastMessage);
+                model.lastMessage = window.WWebJS.getMessageModel(lastMessage);
             }
         }
 
@@ -1650,8 +1829,7 @@ exports.LoadUtils = () => {
                                 .createWid(p.jid);
                             return {
                                 requesterId:
-                                    requesterWid._serialized ||
-                                    requesterWid.$1,
+                                    requesterWid._serialized || requesterWid.$1,
                                 ...(error
                                     ? {
                                           error: +error,
