@@ -290,80 +290,99 @@ class Client extends EventEmitter {
                 this.pupPage,
                 'onAppStateHasSyncedEvent',
                 async () => {
-                    const authEventPayload =
-                        await this.authStrategy.getAuthEventPayload();
-                    /**
-                     * Emitted when authentication is successful
-                     * @event Client#authenticated
-                     */
-                    this.emit(Events.AUTHENTICATED, authEventPayload);
-
-                    const injected = await this.pupPage.evaluate(async () => {
-                        return typeof window.WWebJS !== 'undefined';
-                    });
-
-                    if (!injected) {
-                        if (
-                            this.options.webVersionCache.type === 'local' &&
-                            this.currentIndexHtml
-                        ) {
-                            const { type: webCacheType, ...webCacheOptions } =
-                                this.options.webVersionCache;
-                            const webCache = WebCacheFactory.createWebCache(
-                                webCacheType,
-                                webCacheOptions,
-                            );
-
-                            await webCache.persist(
-                                this.currentIndexHtml,
-                                version,
-                            );
-                        }
-
-                        // Load util functions (serializers, helper functions)
-                        await this.pupPage.evaluate(LoadUtils);
-
-                        await this.pupPage
-                            .waitForFunction(
-                                'typeof window.WWebJS !== "undefined"',
-                                { timeout: 30000 },
-                            )
-                            .catch(() => {
-                                throw 'ready timeout';
-                            });
-
+                    try {
+                        const authEventPayload =
+                            await this.authStrategy.getAuthEventPayload();
                         /**
-                         * Current connection information
-                         * @type {ClientInfo}
+                         * Emitted when authentication is successful
+                         * @event Client#authenticated
                          */
-                        this.info = new ClientInfo(
-                            this,
-                            await this.pupPage.evaluate(() => {
-                                return {
-                                    ...window
-                                        .require('WAWebConnModel')
-                                        .Conn.serialize(),
-                                    wid:
-                                        window
-                                            .require('WAWebUserPrefsMeUser')
-                                            .getMaybeMePnUser() ||
-                                        window
-                                            .require('WAWebUserPrefsMeUser')
-                                            .getMaybeMeLidUser(),
-                                };
-                            }),
+                        this.emit(Events.AUTHENTICATED, authEventPayload);
+
+                        const injected = await this.pupPage.evaluate(
+                            async () => {
+                                return typeof window.WWebJS !== 'undefined';
+                            },
                         );
 
-                        this.interface = new InterfaceController(this);
+                        if (!injected) {
+                            if (
+                                this.options.webVersionCache.type === 'local' &&
+                                this.currentIndexHtml
+                            ) {
+                                const {
+                                    type: webCacheType,
+                                    ...webCacheOptions
+                                } = this.options.webVersionCache;
+                                const webCache = WebCacheFactory.createWebCache(
+                                    webCacheType,
+                                    webCacheOptions,
+                                );
 
-                        await this.attachEventListeners();
+                                await webCache.persist(
+                                    this.currentIndexHtml,
+                                    version,
+                                );
+                            }
+
+                            // Load util functions (serializers, helper functions)
+                            await this.pupPage.evaluate(LoadUtils);
+
+                            await this.pupPage
+                                .waitForFunction(
+                                    'typeof window.WWebJS !== "undefined"',
+                                    { timeout: 30000 },
+                                )
+                                .catch(() => {
+                                    throw 'ready timeout';
+                                });
+
+                            /**
+                             * Current connection information
+                             * @type {ClientInfo}
+                             */
+                            this.info = new ClientInfo(
+                                this,
+                                await this.pupPage.evaluate(() => {
+                                    return {
+                                        ...window
+                                            .require('WAWebConnModel')
+                                            .Conn.serialize(),
+                                        wid:
+                                            window
+                                                .require('WAWebUserPrefsMeUser')
+                                                .getMaybeMePnUser() ||
+                                            window
+                                                .require('WAWebUserPrefsMeUser')
+                                                .getMaybeMeLidUser(),
+                                    };
+                                }),
+                            );
+
+                            this.interface = new InterfaceController(this);
+
+                            await this.attachEventListeners();
+                        }
+                        /**
+                         * Emitted when the client has initialized and is ready to receive messages.
+                         * @event Client#ready
+                         */
+                        this.emit(Events.READY);
+                        this.authStrategy.afterAuthReady();
+                    } catch (err) {
+                        // This runs inside a puppeteer exposed function, so a throw
+                        // here is swallowed: `ready` would simply never fire and the
+                        // client would sit forever on `authenticated` with no trace.
+                        // Surface it instead.
+                        console.error(
+                            '[WWebJS] initialization failed after authentication; `ready` will not fire:',
+                            err,
+                        );
+                        this.emit(
+                            Events.AUTHENTICATION_FAILURE,
+                            `Initialization failed after authentication: ${err?.message || err}`,
+                        );
                     }
-                    /**
-                     * Emitted when the client has initialized and is ready to receive messages.
-                     * @event Client#ready
-                     */
-                    this.emit(Events.READY);
-                    this.authStrategy.afterAuthReady();
                 },
             );
             let lastPercent = null;
@@ -1078,6 +1097,26 @@ class Client extends EventEmitter {
         );
 
         await this.pupPage.evaluate(() => {
+            // WhatsApp renames and drops internal modules between builds. A
+            // missing optional module must not abort this whole evaluate --
+            // doing so leaves every listener unregistered and `ready` never
+            // fires, with the failure swallowed by the exposed function.
+            const req = (name) => {
+                try {
+                    return window.require(name) || null;
+                } catch (err) {
+                    console.error(`[WWebJS] module ${name} unavailable`, err);
+                    return null;
+                }
+            };
+            const optional = (name, fn) => {
+                try {
+                    fn();
+                } catch (err) {
+                    console.error(`[WWebJS] setup ${name} failed`, err);
+                }
+            };
+
             const { Msg, Chat } = window.require('WAWebCollections');
             const AppState = window.require('WAWebSocketModel').Socket;
 
@@ -1106,8 +1145,11 @@ class Client extends EventEmitter {
                 };
 
             // Enable placeholder message resend (recovery for ciphertext messages)
-            const gatingUtils = window.require('WAWebSyncGatingUtils');
-            gatingUtils.isPlaceholderMessageResendEnabled = () => true;
+            optional('placeholder resend gating', () => {
+                const gatingUtils = req('WAWebSyncGatingUtils');
+                if (!gatingUtils) return;
+                gatingUtils.isPlaceholderMessageResendEnabled = () => true;
+            });
 
             Msg.on(
                 'change',
@@ -1168,13 +1210,15 @@ class Client extends EventEmitter {
                     window.onAppStateChangedEvent(state);
                 }),
             );
-            window.require('WAWebConnModel').Conn.on(
-                'change:battery',
-                safe('Conn:change:battery', (state) => {
-                    window.onBatteryStateChangedEvent(state);
-                }),
-            );
-            const WAWebCallCollection = window.require('WAWebCallCollection');
+            optional('battery listener', () => {
+                req('WAWebConnModel')?.Conn.on(
+                    'change:battery',
+                    safe('Conn:change:battery', (state) => {
+                        window.onBatteryStateChangedEvent(state);
+                    }),
+                );
+            });
+            const WAWebCallCollection = req('WAWebCallCollection');
             if (
                 WAWebCallCollection &&
                 typeof WAWebCallCollection.on === 'function'
@@ -1182,27 +1226,41 @@ class Client extends EventEmitter {
                 const mapKey = Object.keys(WAWebCallCollection).find(
                     (k) => WAWebCallCollection[k] instanceof Map,
                 );
-                const internalCallMap = WAWebCallCollection[mapKey];
-                const originalMapSet =
-                    internalCallMap.set.bind(internalCallMap);
+                const internalCallMap = mapKey
+                    ? WAWebCallCollection[mapKey]
+                    : null;
+                const originalMapSet = internalCallMap
+                    ? internalCallMap.set.bind(internalCallMap)
+                    : null;
 
-                internalCallMap.set = function (key, value) {
-                    try {
-                        window.onIncomingCall({
-                            id: value.id,
-                            peerJid: value.peerJid,
-                            isVideo: value.isVideo,
-                            isGroup: value.isGroup,
-                            canHandleLocally: value.canHandleLocally,
-                            outgoing: value.outgoing,
-                            webClientShouldHandle: value.webClientShouldHandle,
-                            participants: value.participants,
-                        });
-                    } catch (err) {
-                        console.error('[WWebJS] onIncomingCall failed', err);
-                    }
-                    return originalMapSet(key, value);
-                };
+                if (!internalCallMap) {
+                    console.error(
+                        '[WWebJS] call collection map not found; incoming call events disabled',
+                    );
+                }
+
+                if (internalCallMap)
+                    internalCallMap.set = function (key, value) {
+                        try {
+                            window.onIncomingCall({
+                                id: value.id,
+                                peerJid: value.peerJid,
+                                isVideo: value.isVideo,
+                                isGroup: value.isGroup,
+                                canHandleLocally: value.canHandleLocally,
+                                outgoing: value.outgoing,
+                                webClientShouldHandle:
+                                    value.webClientShouldHandle,
+                                participants: value.participants,
+                            });
+                        } catch (err) {
+                            console.error(
+                                '[WWebJS] onIncomingCall failed',
+                                err,
+                            );
+                        }
+                        return originalMapSet(key, value);
+                    };
             }
             Chat.on(
                 'remove',
